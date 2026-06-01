@@ -67,11 +67,11 @@ jobs:
       - name: Restore credentials & tokens
         run: |
           mkdir -p credentials tokens
-          if [ -n "${{ secrets.CHANNEL_6_CLIENT_SECRET }}" ]; then
-            echo "${{ secrets.CHANNEL_6_CLIENT_SECRET }}" | base64 -d > credentials/channel_8_client_secret.json
+          if [ -n "${{ secrets.CHANNEL_8_CLIENT_SECRET }}" ]; then
+            echo "${{ secrets.CHANNEL_8_CLIENT_SECRET }}" | base64 -d > credentials/channel_8_client_secret.json
           fi
-          if [ -n "${{ secrets.CHANNEL_6_TOKEN }}" ]; then
-            echo "${{ secrets.CHANNEL_6_TOKEN }}" | base64 -d > tokens/channel_8_token.json
+          if [ -n "${{ secrets.CHANNEL_8_TOKEN }}" ]; then
+            echo "${{ secrets.CHANNEL_8_TOKEN }}" | base64 -d > tokens/channel_8_token.json
           fi
 
       - name: Write .env
