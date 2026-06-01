@@ -1,0 +1,158 @@
+name: Upload Slot 2 - Channel 8 (3 PM PKT)
+
+on:
+  schedule:
+    # Upload at 08:00 UTC — video scheduled to go Public at 10:00 UTC (3 PM PKT)
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Run only this channel ID (leave blank for channel_8)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (no actual upload)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: upload-channel_8
+  cancel-in-progress: false
+
+env:
+  DB_PAGE_ID: channel_8
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get install -y --no-install-recommends --fix-missing ffmpeg 2>/dev/null || true
+          if ! ffmpeg -version > /dev/null 2>&1; then
+            echo "apt install incomplete — falling back to static binary..."
+            wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O /tmp/ffmpeg.tar.xz
+            mkdir -p /tmp/ffmpeg-static
+            tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-static --strip-components 1
+            sudo cp /tmp/ffmpeg-static/ffmpeg /usr/local/bin/ffmpeg
+            sudo cp /tmp/ffmpeg-static/ffprobe /usr/local/bin/ffprobe
+          fi
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Restore DB cache
+        uses: actions/cache@v4
+        with:
+          path: data/channel_8.db
+          key: automation-db-channel_8-${{ github.sha }}-${{ github.run_id }}
+          restore-keys: |
+            automation-db-channel_8-${{ github.sha }}-
+
+      - name: Restore credentials & tokens
+        run: |
+          mkdir -p credentials tokens
+          if [ -n "${{ secrets.CHANNEL_6_CLIENT_SECRET }}" ]; then
+            echo "${{ secrets.CHANNEL_6_CLIENT_SECRET }}" | base64 -d > credentials/channel_8_client_secret.json
+          fi
+          if [ -n "${{ secrets.CHANNEL_6_TOKEN }}" ]; then
+            echo "${{ secrets.CHANNEL_6_TOKEN }}" | base64 -d > tokens/channel_8_token.json
+          fi
+
+      - name: Write .env
+        run: |
+          echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
+          echo "LOG_LEVEL=INFO" >> .env
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "DRY_RUN=true" >> .env
+          else
+            echo "DRY_RUN=false" >> .env
+          fi
+
+      - name: Write TikTok cookies
+        run: |
+          if [ -n "${{ secrets.TIKTOK_COOKIES }}" ]; then
+            echo "${{ secrets.TIKTOK_COOKIES }}" | base64 -d > /tmp/tiktok_cookies.txt
+            echo "TIKTOK_COOKIES_FILE=/tmp/tiktok_cookies.txt" >> $GITHUB_ENV
+          fi
+
+      - name: Run Slot 2
+        run: |
+          CHANNEL_ARG="--channel channel_8"
+          if [ -n "${{ github.event.inputs.channel }}" ]; then
+            CHANNEL_ARG="--channel ${{ github.event.inputs.channel }}"
+          fi
+          python run.py --slot 2 $CHANNEL_ARG
+
+      - name: Save DB cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/channel_8.db
+          key: automation-db-channel_8-${{ github.run_id }}
+
+      - name: Checkpoint DB WAL
+        if: always()
+        run: |
+          if [ -f data/channel_8.db ]; then
+            python -c "import sqlite3; c=sqlite3.connect('data/channel_8.db'); r=c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone(); print('WAL checkpoint:', r); c.close()"
+          fi
+
+      - name: Commit DB to repo
+        if: always()
+        run: |
+          if [ ! -f data/channel_8.db ]; then
+            echo "No DB file found — skipping commit"
+            exit 0
+          fi
+          cp data/channel_8.db /tmp/channel_8_new.db
+          git fetch origin main
+          git restore data/channel_8.db 2>/dev/null || git checkout -- data/channel_8.db 2>/dev/null || true
+          git checkout -B main origin/main
+          cp /tmp/channel_8_new.db data/channel_8.db
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/channel_8.db
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update channel_8.db [skip ci]"
+            for i in 1 2 3; do
+              git push origin main && break
+              echo "Push failed (attempt $i/3) -- re-basing DB onto latest origin..."
+              cp data/channel_8.db /tmp/channel_8_retry.db
+              git fetch origin main
+              git restore data/channel_8.db 2>/dev/null || git checkout -- data/channel_8.db 2>/dev/null || true
+              git checkout -B main origin/main
+              cp /tmp/channel_8_retry.db data/channel_8.db
+              git add -f data/channel_8.db
+              if git diff --staged --quiet; then
+                echo "DB already up to date on origin -- nothing to push"
+                break
+              fi
+              git commit -m "chore: update channel_8.db [skip ci]"
+            done
+          else
+            echo "No DB changes to commit"
+          fi
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-slot2-ch6-${{ github.run_id }}
+          path: logs/
+          retention-days: 14
