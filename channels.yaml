@@ -17,7 +17,11 @@ channels:
     enabled: true
     max_retry_days: 7
     shorts_max_seconds: 180
-    upload_mode: short_only
+    upload_mode: popular_split
+    # Slot 1 = newest unposted from @barusamikos.
+    # Slot 2 = most-VIEWED unposted from @barisamikos (tiktok_username_slot2).
+    # When @barisamikos runs out of unposted videos the code moves slot 2 to
+    # @barusamikos on its own — nothing to change here when that happens.
     slot_publish_times_utc:
       1: "09:00"   # PUBLIC at 6 PM JST
       2: "11:00"   # PUBLIC at 8 PM JST
