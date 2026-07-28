@@ -5,6 +5,8 @@ channels:
     tiktok_username: "barusamikos"
     tiktok_username_slot2: "barisamikos"
     youtube_channel_name: "barusamikos"
+    # The Google account that owns this YouTube channel (supplied by the user).
+    owner_email: "nm4324459@gmail.com"
     google_credentials_file: "credentials/channel_8_client_secret.json"
     oauth_token_file: "tokens/channel_8_token.json"
     videos_per_day: 2
