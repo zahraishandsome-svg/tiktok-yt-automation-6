@@ -691,6 +691,10 @@ def _pick_next_video(channel: Dict[str, Any], slot: int,
     if upload_mode == "tiered_split" and slot == 2:
         return _pick_tiered_split_longform(channel, exclude_ids=exclude_ids)
 
+    # popular_split slot 2 = the most-VIEWED unposted TikTok (slot 1 stays newest).
+    if upload_mode == "popular_split" and slot == 2:
+        return _pick_most_popular(channel, exclude_ids=exclude_ids)
+
     # Resolve optional date filter → Unix timestamp
     min_ts = _parse_min_upload_date(channel.get("min_upload_date"))
 
@@ -783,6 +787,69 @@ def _pick_next_video(channel: Dict[str, Any], slot: int,
         else:
             seen_format = "short"
         db.record_video_seen(channel_id, video, format_type=seen_format)
+        return video
+
+    return None
+
+
+def _pick_most_popular(channel: Dict[str, Any],
+                       exclude_ids: Optional[set] = None) -> Optional[Dict[str, Any]]:
+    """
+    Pick the most-VIEWED unposted TikTok across the WHOLE profile (not just the
+    newest batch — the top video may be old). Used by popular_split slot 2.
+    Uploaded as a Short, same as short_only. Respects min_upload_date and
+    excludes videos already posted (any as a 'short') plus exclude_ids.
+
+    Dual-source channels set tiktok_username_slot2 — slot 2 reads that account
+    instead. When the secondary account has no unposted videos left, the slot falls
+    back to the primary account on its own, so the channel keeps posting twice a day
+    without anyone having to change the config.
+    """
+    channel_id = channel["id"]
+    exclude_ids = exclude_ids or set()
+
+    primary = channel["tiktok_username"]
+    secondary = channel.get("tiktok_username_slot2")
+    sources = [secondary, primary] if secondary else [primary]
+
+    min_ts = _parse_min_upload_date(channel.get("min_upload_date"))
+    already_posted = db.get_posted_video_ids(channel_id, upload_mode="popular_split")
+
+    for i, tiktok_user in enumerate(sources):
+        # Prefer the bounded fetch: TikTok blocks unbounded pagination from CI
+        # runners ("Unable to extract secondary user ID"). _PROFILE_BATCH covers a
+        # whole profile for these accounts, so only reach past it when the profile
+        # really is bigger — and keep the bounded list if that deeper call fails.
+        all_videos = get_profile_videos(tiktok_user)
+        if all_videos is None:
+            raise TikTokUnreachableError(
+                f"TikTok profile @{tiktok_user} is unreachable after retries"
+            )
+        if len(all_videos) >= _PROFILE_BATCH:
+            deeper = get_profile_videos(tiktok_user, end=None)
+            if deeper:
+                all_videos = deeper
+
+        if min_ts is not None:
+            all_videos = [v for v in all_videos if (v.get("timestamp") or 0) >= min_ts]
+
+        eligible = [v for v in all_videos
+                    if v["id"] not in already_posted and v["id"] not in exclude_ids]
+        if not eligible:
+            if i + 1 < len(sources):
+                logger.info(
+                    "[%s] @%s has no unposted videos left — slot 2 falling back to @%s",
+                    channel_id, tiktok_user, sources[i + 1],
+                )
+            continue
+
+        # Highest view_count first (unknown view counts sort last).
+        eligible.sort(key=lambda v: (v.get("view_count") or 0), reverse=True)
+        video = eligible[0]
+        db.record_video_seen(channel_id, video, format_type="short")
+        logger.info("[%s] Slot 2 most-popular pick from @%s: %s (%s views) | '%s'",
+                    channel_id, tiktok_user, video["id"],
+                    video.get("view_count"), video.get("title", ""))
         return video
 
     return None
