@@ -20,6 +20,10 @@ channels:
     max_retry_days: 7
     shorts_max_seconds: 180
     upload_mode: popular_split
+    # How many videos to try when a download fails. The code default is 3, which is
+    # too shallow: on 2026-07-31 TikTok refused three posts in a row and slot 2 lost
+    # the day. Every other channel sets 15-20.
+    max_download_candidates: 20
     # Slot 1 = newest unposted from @barusamikos.
     # Slot 2 = most-VIEWED unposted from @barisamikos (tiktok_username_slot2).
     # When @barisamikos runs out of unposted videos the code moves slot 2 to
