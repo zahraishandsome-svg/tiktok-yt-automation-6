@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parent.parent
 DOWNLOADS_DIR = PROJECT_ROOT / "downloads"
 
-VALID_UPLOAD_MODES = {"short_only", "dual", "longform_only", "split", "trim_dual", "tiered_split"}
+VALID_UPLOAD_MODES = {"short_only", "dual", "longform_only", "split", "trim_dual", "tiered_split",
+                      "long_split"}
 
 
 class TikTokUnreachableError(Exception):
@@ -150,6 +151,9 @@ def run_channel(channel: Dict[str, Any], slot: int, dry_run: bool = False) -> Di
                 # Slot 2 → trim same video to 2:59, upload as Short.
                 # Slot 2 is self-healing: if slot 1 failed, it runs slot 1 first then trims.
                 _run_trim_dual(channel, video, slot, run_id, dry_run, result)
+            elif upload_mode == "long_split":
+                # Both slots → Longform (4:3 blurred-fill); no Shorts at all.
+                _run_longform_only(channel, video, slot, run_id, dry_run, result)
             elif upload_mode == "tiered_split":
                 # Slot 1 → newest Short (respects min_upload_date + min_backlog_for_slot1).
                 # Slot 2 → newest not-yet-longformed video ≥ longform_min_age_days old.
@@ -739,6 +743,10 @@ def _pick_next_video(channel: Dict[str, Any], slot: int,
     today = date.today()
     exclude_ids = exclude_ids or set()
 
+    # long_split (Longform in both slots) has its own picker.
+    if upload_mode == "long_split":
+        return _pick_long_split(channel, slot, exclude_ids=exclude_ids)
+
     # tiered_split slot 2 has its own dedicated picker — handle it separately.
     if upload_mode == "tiered_split" and slot == 2:
         return _pick_tiered_split_longform(channel, exclude_ids=exclude_ids)
@@ -909,6 +917,61 @@ def _pick_most_popular(channel: Dict[str, Any],
         return video
 
     return None
+
+
+def _pick_long_split(channel: Dict[str, Any], slot: int,
+                     exclude_ids: Optional[set] = None) -> Optional[Dict[str, Any]]:
+    """
+    long_split: Longform in both slots, from the primary AND the secondary TikTok
+    account (tiktok_username_slot2) together.
+      slot 1 → the NEWEST unposted clip
+      slot 2 → the most-VIEWED unposted clip
+    Only clips at least `longform_min_seconds` long (a clip whose length the listing
+    does not report is let through; _run_longform_only checks the real file). A video
+    posted once in any format is never posted again.
+    """
+    channel_id = channel["id"]
+    exclude_ids = exclude_ids or set()
+    min_secs = int(channel.get("longform_min_seconds") or 0)
+    sources = [s for s in (channel["tiktok_username"], channel.get("tiktok_username_slot2")) if s]
+    posted = db.get_posted_video_ids(channel_id, upload_mode="long_split")
+
+    def ok(v):
+        d = v.get("duration")
+        return (v["id"] not in posted and v["id"] not in exclude_ids
+                and (d is None or d >= min_secs))
+
+    def pool(end):
+        found, reached = [], False
+        for src in sources:
+            vids = get_profile_videos(src, end=end)
+            if vids is None:
+                logger.warning("[%s] long_split: @%s unreachable", channel_id, src)
+                continue
+            reached = True
+            found += [dict(v, source=src) for v in vids]
+        if not reached:
+            raise TikTokUnreachableError(f"TikTok profiles {sources} are unreachable after retries")
+        return [v for v in found if ok(v)]
+
+    if slot == 2:
+        # the whole catalogue of both accounts: the top clip may be old
+        eligible = sorted(pool(None), key=lambda v: -(v.get("view_count") or 0))
+        what = "most-viewed"
+    else:
+        eligible = sorted(pool(_PROFILE_BATCH), key=lambda v: -(v.get("timestamp") or 0))
+        if not eligible:   # the newest batch is used up — look further back
+            eligible = sorted(pool(None), key=lambda v: -(v.get("timestamp") or 0))
+        what = "newest"
+    if not eligible:
+        logger.info("[%s] long_split slot %d: no unposted %ds+ clip on %s",
+                    channel_id, slot, min_secs, ", ".join("@" + s for s in sources))
+        return None
+    v = eligible[0]
+    logger.info("[%s] long_split slot %d (%s): %s from @%s | %ss | %s views | '%s'",
+                channel_id, slot, what, v["id"], v.get("source"), v.get("duration"),
+                v.get("view_count"), (v.get("title") or "")[:50])
+    return v
 
 
 def _pick_tiered_split_longform(channel: Dict[str, Any],
