@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT))
 MIN_VIEWS = 100_000
 MIN_AGE_DAYS = 7
 COOLDOWN_DAYS = 15
-MAX_ATTEMPTS = 6
+MAX_ATTEMPTS = 10
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)-8s] repost: %(message)s",
                     handlers=[logging.StreamHandler(open(sys.stdout.fileno(), "w", encoding="utf-8",
@@ -282,6 +282,19 @@ def main() -> int:
         path = _download(con, channel, video["id"], out)
         if not path:
             continue
+        if channel.get("repost_as_longform"):
+            # Longform-only channel: repost as 4:3 blurred fill, and only clips that
+            # meet the channel's minimum length.
+            from src.video_converter import convert_to_4_3_blurred, get_video_duration
+            secs = get_video_duration(path) or 0
+            if secs < int(channel.get("longform_min_seconds") or 0):
+                log.info("%s is %.0fs — under the channel's minimum, next candidate", video["id"], secs)
+                path.unlink(missing_ok=True)
+                continue
+            long_path = out / f"{video['id']}_4x3.mp4"
+            convert_to_4_3_blurred(path, long_path)
+            path.unlink(missing_ok=True)
+            path = long_path
         try:
             new_id = _upload(channel, video, path)
         except Exception as exc:  # noqa: BLE001
