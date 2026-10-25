@@ -19,15 +19,18 @@ channels:
     enabled: true
     max_retry_days: 7
     shorts_max_seconds: 180
-    upload_mode: popular_split
+    # One Short + one Long a day (owner, 2026-10-25).
+    #   Slot 1 = newest unposted @barusamikos video as a Short.
+    #   Slot 2 = a LONG video: the 4:3 blurred-fill version of an unposted clip at
+    #            least 15 days old and 60s+, from @barisamikos first, then
+    #            @barusamikos when it runs dry. 98% of both accounts' clips are 60s+.
+    # A video posted once in any format is never posted again.
+    upload_mode: tiered_split
+    longform_min_seconds: 60
     # How many videos to try when a download fails. The code default is 3, which is
     # too shallow: on 2026-07-31 TikTok refused three posts in a row and slot 2 lost
     # the day. Every other channel sets 15-20.
     max_download_candidates: 20
-    # Slot 1 = newest unposted from @barusamikos.
-    # Slot 2 = most-VIEWED unposted from @barisamikos (tiktok_username_slot2).
-    # When @barisamikos runs out of unposted videos the code moves slot 2 to
-    # @barusamikos on its own — nothing to change here when that happens.
     slot_publish_times_utc:
-      1: "09:00"   # PUBLIC at 6 PM JST
-      2: "11:00"   # PUBLIC at 8 PM JST
+      1: "09:00"   # PUBLIC at 6 PM JST (Short)
+      2: "11:00"   # PUBLIC at 8 PM JST (Long)
