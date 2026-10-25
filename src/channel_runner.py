@@ -952,14 +952,11 @@ def _pick_tiered_split_longform(channel: Dict[str, Any],
             "timestamp": r.get("tiktok_timestamp"),
         }
 
-    # Fetch full profile — need old videos so can't use the fast 50-video batch.
-    logger.info("[%s] tiered_split slot 2: fetching full TikTok profile @%s",
-                channel_id, tiktok_user)
-    all_videos = get_profile_videos(tiktok_user, end=None)
-    if all_videos is None:
-        raise TikTokUnreachableError(
-            f"TikTok profile @{tiktok_user} is unreachable after retries"
-        )
+    # Dual-source channels (tiktok_username_slot2) take their Longform from the
+    # secondary account first and fall back to the primary one once it has nothing
+    # eligible left — same idea as popular_split slot 2.
+    secondary = channel.get("tiktok_username_slot2")
+    sources = [secondary, tiktok_user] if secondary else [tiktok_user]
 
     # Get video IDs already uploaded as longform (the only exclusion for slot 2).
     # Any format counts: a video that already went out as a Short must not come
@@ -970,13 +967,31 @@ def _pick_tiered_split_longform(channel: Dict[str, Any],
     else:
         already_longformed = db.get_posted_video_ids(channel_id, upload_mode="tiered_split")
 
-    # Filter: must be old enough + not already longformed + not already tried this run.
-    eligible = [
-        v for v in all_videos
-        if (v.get("timestamp") or 0) <= cutoff_ts
-        and v["id"] not in already_longformed
-        and v["id"] not in exclude_ids
-    ]
+    eligible = []
+    for i, src in enumerate(sources):
+        # Fetch full profile — need old videos so can't use the fast 50-video batch.
+        logger.info("[%s] tiered_split slot 2: fetching full TikTok profile @%s",
+                    channel_id, src)
+        all_videos = get_profile_videos(src, end=None)
+        if all_videos is None:
+            if i + 1 < len(sources):
+                logger.warning("[%s] @%s unreachable — trying @%s", channel_id, src, sources[i + 1])
+                continue
+            raise TikTokUnreachableError(
+                f"TikTok profile @{src} is unreachable after retries"
+            )
+        # Filter: must be old enough + not already posted + not already tried this run.
+        eligible = [
+            v for v in all_videos
+            if (v.get("timestamp") or 0) <= cutoff_ts
+            and v["id"] not in already_longformed
+            and v["id"] not in exclude_ids
+        ]
+        if eligible:
+            break
+        if i + 1 < len(sources):
+            logger.info("[%s] @%s has no eligible longform video left — using @%s",
+                        channel_id, src, sources[i + 1])
 
     # TikTok returns newest-first, so eligible[0] is the newest video ≥ min_age_days old.
     if not eligible:
