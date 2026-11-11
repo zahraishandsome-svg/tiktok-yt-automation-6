@@ -17,6 +17,8 @@ channels:
       - viral
     youtube_category_id: "22"
     enabled: true
+    # Long uploads get a Claude-written title + description in this language (owner 2026-11-12, long only)
+    ai_longform_metadata: Japanese
     max_retry_days: 7
     shorts_max_seconds: 180
     # LONG VIDEOS ONLY — Shorts paused (owner, 2026-10-25; this channel only).
