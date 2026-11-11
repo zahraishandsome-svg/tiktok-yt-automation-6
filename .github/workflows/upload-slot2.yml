@@ -138,6 +138,22 @@ jobs:
           DB_PAGE_ID: channel_8
         run: python repost.py --slot 2 --channel channel_8
 
+      - name: AI thumbnail for new long videos
+        # Claude watches the video, Vertex (Gemini) draws the scene, we add the Japanese
+        # text; then thumbnails.set. Runs after the repost so a long repost gets one too.
+        # Never fails the upload job.
+        if: always()
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          VERTEX_API_KEY: ${{ secrets.VERTEX_API_KEY }}
+          VERTEX_PROJECT: ${{ secrets.VERTEX_PROJECT }}
+          DB_PAGE_ID: channel_8
+        run: |
+          mkdir -p fonts
+          curl -fsSL --retry 3 --max-time 120 -o fonts/NotoSansJP.ttf "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf"
+          python thumbnails.py --channel channel_8 --lang Japanese
+
       - name: Save DB cache
         if: always()
         uses: actions/cache/save@v4
