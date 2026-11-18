@@ -142,7 +142,7 @@ jobs:
         run: |
           mkdir -p fonts
           curl -fsSL --retry 3 --max-time 120 -o fonts/NotoSansJP.ttf "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf" || true
-          python merge_upload.py --channel channel_8 --slot 2
+          python merge_upload.py --channel channel_8 --slot 2 ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: AI thumbnail for new long videos
         # Claude watches the video, Vertex (Gemini) draws the scene, we add the Japanese
